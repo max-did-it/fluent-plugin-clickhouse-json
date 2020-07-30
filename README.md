@@ -29,6 +29,8 @@ Additional fields:
     password <password>, default password is ""
     datetime_name <field name>, field with DateTime value
     tz_offset <minutes>, timezone offset in minutes
+    error_response_as_unrecoverable <true>, whatever to raise unrecoverable error when the response is non success. Default is "false"
+    retryable_response_codes <array>, the list of retryable response code. Default is [503]
 <match inp>
 ```
 
