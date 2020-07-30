@@ -8,6 +8,8 @@ module Fluent
   module Plugin
     class ClickhousejsonOutput < Fluent::Plugin::Output
         Fluent::Plugin.register_output("clickhousejson", self)
+        
+        class RetryableResponse < StandardError; end
 
         helpers :compat_parameters
 
@@ -29,6 +31,10 @@ module Fluent
         config_param :tz_offset, :integer, default: 0
         desc "Name of internal fluentd time field (if need to use)"
         config_param :datetime_name, :string, default: nil
+        desc "Raise UnrecoverableError when the response is non success, 4xx/5xx"
+        config_param :error_response_as_unrecoverable, :bool, default: false
+        desc "The list of retryable response code"
+        config_param :retryable_response_codes, :array, value_type: :integer, default: [503]
         config_section :buffer do
             config_set_default :@type, "file"
             config_set_default :chunk_keys, ["time"]
@@ -46,11 +52,15 @@ module Fluent
             test_connection(conf)
         end
 
+        def multi_workers_ready?
+            true
+        end
+
         def test_connection(conf)
             uri = @uri.clone
             uri.query = URI.encode_www_form(@uri_params.merge({"query" => "SHOW TABLES"}))
             begin
-        	res = Net::HTTP.get_response(uri)
+        	    res = Net::HTTP.get_response(uri)
             rescue Errno::ECONNREFUSED
         	    raise Fluent::ConfigError, "Couldn't connect to ClickHouse at #{ @uri } - connection refused"
             end
@@ -79,17 +89,30 @@ module Fluent
 	    end
 
         def write(chunk)
-            uri = @uri.clone
-            query = {"query" => "INSERT INTO #{@table} FORMAT JSONEachRow"}
-            uri.query = URI.encode_www_form(@uri_params.merge(query))
-            req = Net::HTTP::Post.new(uri)
-            req.body = chunk.read
-            http = Net::HTTP.new(uri.hostname, uri.port)
-            resp = http.request(req)
+          uri = @uri.clone
+          query = {"query" => "INSERT INTO #{@table} FORMAT JSONEachRow"}
+          uri.query = URI.encode_www_form(@uri_params.merge(query))
 
-            if resp.code != "200"
-        	    raise "Clickhouse responded: #{resp.body}"
-            end
+          req = Net::HTTP::Post.new(uri)
+          req.body = chunk.read
+
+          res = Net::HTTP.start(uri.host, uri.port) { |http| http.request(req) }
+
+          if res.is_a?(Net::HTTPSuccess)
+            return
+          end
+          
+          msg = "Clickhouse responded: #{res.body}"
+
+          if @retryable_response_codes.include?(res.code.to_i)
+            raise RetryableResponse, msg
+          end
+
+          if @error_response_as_unrecoverable
+            raise Fluent::UnrecoverableError, msg
+          else
+            log.error msg
+          end
         end
     end
   end
