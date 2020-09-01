@@ -1,5 +1,5 @@
 Gem::Specification.new do |s|
-  s.name        = 'Fluent Plugin Clickhouse-json'
+  s.name        = 'fluent-plugin-clickhouse-json'
   s.version     = '0.1'
   s.authors     = ['Max Bezlegkiy']
   s.email       = ['max-bez-l@mail.ru']
